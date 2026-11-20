@@ -8,7 +8,7 @@ import { NextRequest } from "next/server";
 import { GET as getRoomRoute, POST as changeRoomRoute } from "../src/app/api/rooms/[code]/route";
 import { POST as createRoomRoute } from "../src/app/api/rooms/route";
 import { withRoomTransaction } from "../src/lib/db";
-import { RoomError } from "../src/lib/errors";
+import { errors, RoomError } from "../src/lib/errors";
 import { decide } from "../src/lib/results";
 import { createRoom, getRoom, updateRoom } from "../src/lib/rooms";
 import { SAMPLE_AREA, SAMPLE_PLACES } from "../src/lib/types";
@@ -79,7 +79,9 @@ test("the room API validates input and keeps host authority in a scoped cookie",
   const headers = { "Content-Type": "application/json" };
   const origin = "https://example.test";
   const create = (data: object) => createRoomRoute(new Request(`${origin}/api/rooms`, { method: "POST", headers, body: JSON.stringify(data) }));
-  assert.equal((await create({ name: " ", demo: true })).status, 400);
+  const invalidName = await create({ name: " ", demo: true });
+  assert.equal(invalidName.status, 400);
+  assert.deepEqual(await invalidName.json(), { error: errors.invalidName.en, code: "invalidName" });
   assert.equal((await create({ name: "Alex", area: { lat: 91, lon: 0, label: "Invalid" } })).status, 400);
   const created = await create({ name: "Alex", demo: true });
   assert.equal(created.status, 201);
@@ -97,7 +99,9 @@ test("the room API validates input and keeps host authority in a scoped cookie",
     headers: { ...headers, ...(session ? { Cookie: session } : {}) },
     body: JSON.stringify({ action: "start" }),
   }), context);
-  assert.equal((await start()).status, 403);
+  const forbidden = await start();
+  assert.equal(forbidden.status, 403);
+  assert.deepEqual(await forbidden.json(), { error: errors.joinFirst.en, code: "joinFirst" });
   assert.equal((await start(cookie.split(";")[0])).status, 200);
   assert.equal((await getRoomRoute(new NextRequest(url), context)).headers.get("Cache-Control"), "private, no-store");
 });

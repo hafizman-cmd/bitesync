@@ -1,6 +1,8 @@
+import { errors, isErrorCode, type ErrorCode } from "./errors";
+
 export class RequestError extends Error {
-  constructor(message: string, public status: number) {
-    super(message);
+  constructor(public code: ErrorCode, public status: number) {
+    super(errors[code].en);
   }
 }
 
@@ -13,11 +15,11 @@ export async function requestJson<T>(url: string, data?: object): Promise<T> {
   } : { cache: "no-store", signal: AbortSignal.timeout(12000) });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
-    throw new RequestError(body?.error ?? "Something went wrong. Try again.", response.status);
+    throw new RequestError(isErrorCode(body?.code) ? body.code : "serverError", response.status);
   }
   return response.json() as Promise<T>;
 }
 
-export function errorMessage(error: unknown) {
-  return error instanceof RequestError ? error.message : "Couldn't reach BiteSync. Check your connection and try again.";
+export function requestErrorCode(error: unknown): ErrorCode {
+  return error instanceof RequestError ? error.code : "networkError";
 }

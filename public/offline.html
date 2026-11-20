@@ -3,12 +3,29 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>You're offline | BiteSync</title>
+    <title>You're offline | Make Mano</title>
     <style>
       :root{color-scheme:light dark}body{margin:0;padding:8vh 6vw;background:#FAF9F6;color:#221e1b;font:16px system-ui}
       main{max-width:420px;margin:auto}h1{font:42px Georgia,serif}a{display:inline-block;padding:14px 20px;background:#D94E1F;border-radius:10px;color:white;text-decoration:none}
       @media(prefers-color-scheme:dark){body{background:#111110;color:#FAF9F6}}
     </style>
   </head>
-  <body><main><h1>You’re offline.</h1><p>Reconnect to join a room or send your votes.</p><a href="/">Back to BiteSync</a></main></body>
+  <body>
+    <main>
+      <h1 id="heading">You’re offline.</h1>
+      <p id="message">Reconnect to join a room or send your votes.</p>
+      <a id="home" href="/">Back to Make Mano</a>
+    </main>
+    <script>
+      try {
+        if (document.cookie.split(";").some((value) => value.trim() === "bitesync-locale=ms")) {
+          document.documentElement.lang = "ms";
+          document.title = "Anda di luar talian | Make Mano";
+          document.getElementById("heading").textContent = "Anda di luar talian.";
+          document.getElementById("message").textContent = "Sambung semula ke internet untuk menyertai bilik atau menghantar undian.";
+          document.getElementById("home").textContent = "Kembali ke Make Mano";
+        }
+      } catch {}
+    </script>
+  </body>
 </html>

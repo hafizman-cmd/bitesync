@@ -1,10 +1,18 @@
 import type { Metadata } from "next";
 import { Header } from "@/components/site";
 import { CreateRoom } from "@/components/create-room";
+import { copy } from "@/lib/copy";
+import { getLocale } from "@/lib/server-locale";
 
-export const metadata: Metadata = { title: "Create room" };
+type Props = { searchParams: Promise<{ demo?: string }> };
 
-export default async function CreatePage({ searchParams }: { searchParams: Promise<{ demo?: string }> }) {
-  const demo = (await searchParams).demo === "1";
-  return <><Header /><main className="flow-main"><CreateRoom demo={demo} /></main></>;
+export async function generateMetadata({ searchParams }: Props): Promise<Metadata> {
+  const [locale, { demo }] = await Promise.all([getLocale(), searchParams]);
+  const t = copy[locale];
+  return { title: demo === "1" ? t.trySample : t.create };
+}
+
+export default async function CreatePage({ searchParams }: Props) {
+  const [locale, { demo }] = await Promise.all([getLocale(), searchParams]);
+  return <><Header locale={locale} /><main className="flow-main"><CreateRoom demo={demo === "1"} locale={locale} /></main></>;
 }

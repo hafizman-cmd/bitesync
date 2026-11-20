@@ -1,7 +1,7 @@
-const CACHE = "bitesync-shell-v1";
+const CACHE = "bitesync-shell-v2";
 
 self.addEventListener("install", (event) => {
-  event.waitUntil(caches.open(CACHE).then((cache) => cache.add("/offline.html")));
+  event.waitUntil(caches.open(CACHE).then((cache) => cache.add("/offline.html")).then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", (event) => {

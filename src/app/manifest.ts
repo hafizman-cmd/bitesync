@@ -1,10 +1,11 @@
 import type { MetadataRoute } from "next";
+import { brand } from "@/lib/copy";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
     id: "/",
-    name: "BiteSync",
-    short_name: "BiteSync",
+    name: brand,
+    short_name: brand,
     description: "Decide where to eat together in 90 seconds.",
     start_url: "/",
     scope: "/",

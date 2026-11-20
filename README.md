@@ -1,6 +1,6 @@
-# BiteSync
+# Make Mano
 
-Decide where to eat together in a 90-second round. Create a room, share its link, and vote on nearby restaurants. Diners join with a display name.
+Decide where to eat together in a 90-second round. Create a room, share its link, and vote on nearby restaurants. Diners join with a display name. Use the header’s **BM** or **EN** button to switch between Bahasa Melayu and English.
 
 ## Run locally
 
@@ -11,7 +11,7 @@ npm ci
 npm run dev
 ```
 
-Open [BiteSync](http://localhost:3000) and select **Try a demo**. Create a sample room, copy its link, and open it in a separate browser profile or private window to join as a second diner. In the host window, select **Start round**.
+Open [Make Mano](http://localhost:3000) and select **Try a demo**. Create a sample room, copy its link, and open it in a separate browser profile or private window to join as a second diner. In the host window, select **Start round**.
 
 With no database credentials, the app creates a local SQLite database called `bitesync.db`. Sample rooms use four fixtures and never call Geoapify. Sample photos illustrate cuisines.
 
@@ -19,7 +19,7 @@ With no database credentials, the app creates a local SQLite database called `bi
 
 Copy `.env.example` to `.env.local`. Set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` from a Turso database and `GEOAPIFY_API_KEY` from a Geoapify project. The server initializes the tables on first use. Restart the app after editing environment variables.
 
-Select **Create room**, search for a city or neighborhood or grant browser location access, then pick an area. BiteSync uses Geoapify Geocoding and searches for up to eight named restaurants within 3 km using Places v2. Live place cards include addresses and distances from the search center. Use HTTPS for location access from phones.
+Select **Create room**, search for a city or neighborhood or grant browser location access, then pick an area. Make Mano uses Geoapify Geocoding and searches for up to eight named restaurants within 3 km using Places v2. Live place cards include addresses and distances from the search center. Use HTTPS for location access from phones.
 
 ## Round rules
 
@@ -37,8 +37,8 @@ npm run build
 npm start
 ```
 
-Use a Next.js host with a free Node.js tier, such as Vercel Hobby for eligible personal projects. Add the four environment variables in the provider’s settings and set `NEXT_PUBLIC_APP_URL` to the public HTTPS origin. Use remote Turso for shared state across instances. Small groups can run within the providers’ free-tier quotas. BiteSync uses Google Maps links for directions.
+Use a Next.js host with a free Node.js tier, such as Vercel Hobby for eligible personal projects. Add the four environment variables in the provider’s settings and set `NEXT_PUBLIC_APP_URL` to the public HTTPS origin. Use remote Turso for shared state across instances. Small groups can run within the providers’ free-tier quotas. Make Mano uses Google Maps links for directions.
 
-Use the browser’s install action, or **Share > Add to Home Screen** on iOS. The production app includes a manifest and an offline screen. Room updates and votes require an internet connection.
+Use the browser’s install action, or **Share > Add to Home Screen** on iOS. The production app includes a manifest and an offline screen in both languages. Room updates and votes require an internet connection.
 
 Homepage photos from the [Pak Gembus Malaysia website](https://ayamgepukpakgembus.com.my/). Other photos from [Unsplash](https://unsplash.com/license). Locally hosted DM Sans and Instrument Serif fonts are distributed under the SIL Open Font License. Restaurant data is provided by [Geoapify](https://www.geoapify.com/) and [OpenStreetMap contributors](https://www.openstreetmap.org/copyright).

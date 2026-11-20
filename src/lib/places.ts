@@ -23,7 +23,7 @@ function normalizeCuisine(value: string) {
 async function geoapify(path: string, params: Record<string, string>): Promise<Feature[]> {
   const key = process.env.GEOAPIFY_API_KEY;
   if (!key || key === "your-geoapify-api-key") {
-    throw new RoomError("Nearby search needs a Geoapify API key. You can still try a sample room.", 503);
+    throw new RoomError("placesUnconfigured", 503);
   }
 
   const query = new URLSearchParams({ ...params, apiKey: key });
@@ -36,7 +36,7 @@ async function geoapify(path: string, params: Record<string, string>): Promise<F
     const data = await response.json() as { features?: Feature[] };
     return data.features ?? [];
   } catch {
-    throw new RoomError("Nearby search is temporarily unavailable. Try again or use a sample room.", 502);
+    throw new RoomError("placesUnavailable", 502);
   }
 }
 

@@ -12,7 +12,7 @@ function readAction(body: Record<string, unknown>): RoomAction {
   if (body.action === "vote" && typeof body.placeId === "string" && VOTES.includes(body.vote as Vote)) {
     return { action: "vote", placeId: body.placeId, vote: body.vote as Vote };
   }
-  throw new RoomError("That room action is invalid.");
+  throw new RoomError("invalidAction");
 }
 
 export async function GET(request: NextRequest, { params }: Context) {

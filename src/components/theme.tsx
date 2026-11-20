@@ -2,6 +2,8 @@
 
 import { Moon, Sun } from "lucide-react";
 import { useSyncExternalStore } from "react";
+import { copy } from "@/lib/copy";
+import type { Locale } from "@/lib/locale";
 
 const query = "(prefers-color-scheme: dark)";
 const event = "bitesync:theme";
@@ -24,7 +26,7 @@ function currentTheme() {
   return saved || (matchMedia(query).matches ? "dark" : "light");
 }
 
-export function ThemeToggle() {
+export function ThemeToggle({ locale }: { locale: Locale }) {
   const dark = useSyncExternalStore(subscribe, currentTheme, () => "light") === "dark";
   function toggle() {
     const next = dark ? "light" : "dark";
@@ -33,7 +35,7 @@ export function ThemeToggle() {
     window.dispatchEvent(new Event(event));
   }
   const Icon = dark ? Sun : Moon;
-  return <button className="theme-button" type="button" onClick={toggle} aria-label={dark ? "Use light theme" : "Use dark theme"}>
+  return <button className="theme-button" type="button" onClick={toggle} aria-label={dark ? copy[locale].light : copy[locale].dark}>
     <Icon size={19} strokeWidth={1.75} />
   </button>;
 }

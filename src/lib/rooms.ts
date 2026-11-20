@@ -14,7 +14,7 @@ function digest(token: string) {
 async function snapshot(tx: Transaction, code: string, token?: string): Promise<RoomState> {
   const rooms = await tx.execute({ sql: "SELECT * FROM rooms WHERE code = ? AND created_at > ?", args: [code, Date.now() - ROOM_LIFETIME] });
   const room = rooms.rows[0];
-  if (!room) throw new RoomError("This room is unavailable or has expired.", 404);
+  if (!room) throw new RoomError("roomExpired", 404);
 
   const players = await tx.execute({ sql: "SELECT token, name, host FROM players WHERE room_code = ? ORDER BY host DESC, joined_at, token", args: [code] });
   const ballots = await tx.execute({ sql: "SELECT token, place_id, vote FROM ballots WHERE room_code = ?", args: [code] });
@@ -71,28 +71,28 @@ export async function updateRoom(code: string, input: RoomAction, token?: string
 
     if (input.action === "join") {
       if (room.me) return { room, token };
-      if (room.status !== "lobby") throw new RoomError("The round has already started. You can follow the result.", 409);
-      if (room.players.length >= MAX_PLAYERS) throw new RoomError("This room is full.", 409);
+      if (room.status !== "lobby") throw new RoomError("alreadyStarted", 409);
+      if (room.players.length >= MAX_PLAYERS) throw new RoomError("roomFull", 409);
 
       const newToken = randomBytes(24).toString("base64url");
       await tx.execute({ sql: "INSERT INTO players VALUES (?, ?, ?, 0, ?)", args: [code, digest(newToken), input.name, Date.now()] });
       return { room: await snapshot(tx, code, newToken), token: newToken };
     }
 
-    if (!token || !room.me) throw new RoomError("Join the room first.", 403);
+    if (!token || !room.me) throw new RoomError("joinFirst", 403);
 
     if (input.action === "start") {
-      if (!room.me.host) throw new RoomError("Only the host can start the round.", 403);
+      if (!room.me.host) throw new RoomError("hostOnly", 403);
       if (room.status !== "lobby") return { room };
       await tx.execute({ sql: "UPDATE rooms SET deadline = ? WHERE code = ?", args: [Date.now() + ROUND_SECONDS * 1000, code] });
     } else {
-      if (!room.places.some((place) => place.id === input.placeId)) throw new RoomError("That restaurant is outside this round.", 404);
+      if (!room.places.some((place) => place.id === input.placeId)) throw new RoomError("unknownPlace", 404);
       const previousVote = room.me.votes[input.placeId];
       if (previousVote === input.vote) return { room };
-      if (room.status !== "active") throw new RoomError("Voting is closed.", 409);
-      if (previousVote) throw new RoomError("You already voted on this restaurant.", 409);
+      if (room.status !== "active") throw new RoomError("votingClosed", 409);
+      if (previousVote) throw new RoomError("duplicateVote", 409);
       if ((input.vote === "crave" || input.vote === "veto") && Object.values(room.me.votes).includes(input.vote)) {
-        throw new RoomError("You already used that vote this round.", 409);
+        throw new RoomError("specialVoteUsed", 409);
       }
       await tx.execute({
         sql: "INSERT INTO ballots VALUES (?, ?, ?, ?)",
