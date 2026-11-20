@@ -1,0 +1,10 @@
+node_modules/
+.next/
+.env*
+!.env.example
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.tsbuildinfo
+next-env.d.ts
