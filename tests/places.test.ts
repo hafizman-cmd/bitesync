@@ -19,9 +19,14 @@ test("Geoapify requests use the correct endpoints and normalize place cards", as
     const url = new URL(input);
     assert.equal(url.hostname, "api.geoapify.com");
     assert.equal(url.searchParams.get("apiKey"), "test-key");
-    if (url.pathname === "/v1/geocode/search") {
-      assert.equal(url.searchParams.get("text"), "Brooklyn");
-      return Response.json({ features: [{ properties: { ...area, formatted: area.label } }] });
+    if (url.pathname === "/v1/geocode/autocomplete") {
+      assert.equal(url.searchParams.get("text"), "Brook");
+      assert.equal(url.searchParams.get("format"), "geojson");
+      assert.equal(url.searchParams.get("limit"), "5");
+      return Response.json({ features: [
+        { properties: { ...area, formatted: area.label } },
+        { properties: { formatted: "Incomplete suggestion" } },
+      ] });
     }
 
     assert.equal(url.pathname, "/v2/places");
@@ -42,7 +47,8 @@ test("Geoapify requests use the correct endpoints and normalize place cards", as
     ] });
   });
 
-  const response = await areasRoute(new NextRequest("http://localhost/api/areas?q=Brooklyn"));
+  assert.equal((await areasRoute(new NextRequest("http://localhost/api/areas?q=B"))).status, 400);
+  const response = await areasRoute(new NextRequest("http://localhost/api/areas?q=%20Brook%20"));
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), { areas: [area] });
 

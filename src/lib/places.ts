@@ -45,7 +45,7 @@ async function geoapify(path: string, params: Record<string, string>): Promise<F
 }
 
 export async function searchAreas(query: string): Promise<Area[]> {
-  const features = await geoapify("v1/geocode/search", { text: query, limit: "5" });
+  const features = await geoapify("v1/geocode/autocomplete", { text: query, limit: "5", format: "geojson" });
   return features.flatMap(({ properties }) => {
     const { lat, lon, formatted } = properties;
     return typeof lat === "number" && typeof lon === "number" && formatted ? [{ lat, lon, label: formatted }] : [];

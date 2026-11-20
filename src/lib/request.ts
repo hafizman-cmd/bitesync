@@ -6,13 +6,15 @@ export class RequestError extends Error {
   }
 }
 
-export async function requestJson<T>(url: string, data?: object): Promise<T> {
+export async function requestJson<T>(url: string, data?: object, signal?: AbortSignal): Promise<T> {
+  const timeout = AbortSignal.timeout(data ? 15000 : 12000);
+  const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout;
   const response = await fetch(url, data ? {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
-    signal: AbortSignal.timeout(15000),
-  } : { cache: "no-store", signal: AbortSignal.timeout(12000) });
+    signal: requestSignal,
+  } : { cache: "no-store", signal: requestSignal });
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new RequestError(isErrorCode(body?.code) ? body.code : "serverError", response.status);

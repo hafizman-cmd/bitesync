@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, ArrowUpRight, Ban, Check, Clock3, Copy, Heart, Link2, MapPin, Star, Users, Utensils, X } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowUpRight, Ban, Check, Clock3, Copy, Heart, Link2, MapPin, Share2, Star, Users, Utensils, X } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { type FormEvent, type PointerEvent, useEffect, useRef, useState } from "react";
@@ -67,6 +67,8 @@ export function Room({ code, locale }: { code: string; locale: Locale }) {
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showLink, setShowLink] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [shareFailed, setShareFailed] = useState(false);
   const [now, setNow] = useState(0);
   const clockOffset = useRef(0);
   const revision = useRef(0);
@@ -146,8 +148,18 @@ export function Room({ code, locale }: { code: string; locale: Locale }) {
     }
   }
 
-  async function copyLink() {
-    const link = new URL(window.location.pathname, window.location.origin).href;
+  async function shareLink(link: string) {
+    setSharing(true);
+    try {
+      await navigator.share({ url: link });
+    } catch (error) {
+      if (!(error instanceof DOMException && error.name === "AbortError")) setShareFailed(true);
+    } finally {
+      setSharing(false);
+    }
+  }
+
+  async function copyLink(link: string) {
     try {
       await navigator.clipboard.writeText(link);
       setCopied(true);
@@ -171,6 +183,8 @@ export function Room({ code, locale }: { code: string; locale: Locale }) {
   </div>;
 
   const ballots = room.me?.votes ?? {};
+  const link = new URL(window.location.pathname, window.location.origin).href;
+  const canShare = typeof navigator.share === "function";
   const cast = Object.keys(ballots).length;
   const current = room.places.find((place) => !Object.hasOwn(ballots, place.id));
   const seconds = Math.max(0, Math.min(ROUND_SECONDS, Math.ceil(((room.deadline ?? now) - now) / 1000)));
@@ -200,10 +214,13 @@ export function Room({ code, locale }: { code: string; locale: Locale }) {
           </li>)}
         </ul>
         <div className="stack compact">
-          <button className="button secondary wide" type="button" onClick={() => void copyLink()}>
+          {canShare && <button className="button secondary wide" type="button" disabled={sharing} onClick={() => void shareLink(link)}>
+            <Share2 size={18} strokeWidth={1.75} /> {t.shareLink}
+          </button>}
+          {(!canShare || shareFailed) && <button className="button secondary wide" type="button" onClick={() => void copyLink(link)}>
             {copied ? <Check size={18} strokeWidth={1.75} /> : <Copy size={18} strokeWidth={1.75} />} {copied ? t.copied : t.copyLink}
-          </button>
-          {showLink && <label className="field">{t.link}<input readOnly value={window.location.href} onFocus={(event) => event.currentTarget.select()} /></label>}
+          </button>}
+          {showLink && <label className="field">{t.link}<input readOnly value={link} onFocus={(event) => event.currentTarget.select()} /></label>}
           {room.me.host && <button className="button primary wide" type="button" disabled={busy} onClick={() => void act({ action: "start" })}>
             {busy ? t.starting : t.start} <ArrowRight size={19} strokeWidth={1.75} />
           </button>}

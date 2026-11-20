@@ -3,7 +3,7 @@
 import { ArrowLeft, ArrowRight, Crosshair, MapPin, Search, Utensils } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { type FormEvent, useState } from "react";
+import { type FormEvent, useEffect, useRef, useState } from "react";
 import { copy } from "@/lib/copy";
 import { errors, type ErrorCode } from "@/lib/errors";
 import type { Locale } from "@/lib/locale";
@@ -19,21 +19,35 @@ export function CreateRoom({ demo, locale }: { demo: boolean; locale: Locale }) 
   const [options, setOptions] = useState<Area[] | null>(null);
   const [area, setArea] = useState<Area | null>(null);
   const [radiusKm, setRadiusKm] = useState<number>(DEFAULT_SEARCH_DISTANCE_KM);
-  const [busy, setBusy] = useState<"search" | "location" | "create" | null>(null);
+  const [busy, setBusy] = useState<"location" | "create" | null>(null);
+  const [searching, setSearching] = useState(false);
+  const areaSearch = useRef<AbortController | null>(null);
   const [error, setError] = useState<ErrorCode | null>(null);
 
-  async function search() {
-    if (query.trim().length < 2 || busy) return;
+  useEffect(() => () => areaSearch.current?.abort(), []);
+
+  function search(value: string, delay = 0) {
+    areaSearch.current?.abort();
     setError(null);
     setOptions(null);
-    setBusy("search");
-    try {
-      setOptions((await requestJson<{ areas: Area[] }>(`/api/areas?q=${encodeURIComponent(query.trim())}`)).areas);
-    } catch (error) {
-      setError(requestErrorCode(error));
-    } finally {
-      setBusy(null);
-    }
+    const trimmed = value.trim();
+    const canSearch = trimmed.length >= 2;
+    setSearching(canSearch);
+    if (!canSearch) return;
+
+    const controller = new AbortController();
+    areaSearch.current = controller;
+    const timer = window.setTimeout(async () => {
+      try {
+        const { areas } = await requestJson<{ areas: Area[] }>(`/api/areas?q=${encodeURIComponent(trimmed)}`, undefined, controller.signal);
+        if (!controller.signal.aborted) setOptions(areas);
+      } catch (error) {
+        if (!controller.signal.aborted) setError(requestErrorCode(error));
+      } finally {
+        if (!controller.signal.aborted) setSearching(false);
+      }
+    }, delay);
+    controller.signal.addEventListener("abort", () => window.clearTimeout(timer), { once: true });
   }
 
   function locate() {
@@ -41,11 +55,13 @@ export function CreateRoom({ demo, locale }: { demo: boolean; locale: Locale }) 
       setError("locationUnavailable");
       return;
     }
+    areaSearch.current?.abort();
+    setSearching(false);
+    setOptions(null);
     setError(null);
     setBusy("location");
     navigator.geolocation.getCurrentPosition(({ coords }) => {
       setArea({ label: "Near me", lat: coords.latitude, lon: coords.longitude });
-      setOptions(null);
       setBusy(null);
     }, ({ code }) => {
       setError(code === 1 ? "locationDenied" : "locationNotFound");
@@ -60,6 +76,9 @@ export function CreateRoom({ demo, locale }: { demo: boolean; locale: Locale }) 
       setError("chooseArea");
       return;
     }
+    areaSearch.current?.abort();
+    setSearching(false);
+    setOptions(null);
     setError(null);
     setBusy("create");
     try {
@@ -84,10 +103,20 @@ export function CreateRoom({ demo, locale }: { demo: boolean; locale: Locale }) 
         {!demo && <div className="stack compact">
           <label className="field" htmlFor="where">{t.where}</label>
           <div className="search-row">
-            <input id="where" placeholder={t.areaPlaceholder} value={query} disabled={!!busy} maxLength={100}
-              onChange={(event) => { setQuery(event.target.value); setArea(null); setOptions(null); }}
-              onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void search(); } }} />
-            <button className="button secondary search-button" type="button" onClick={() => void search()} disabled={!!busy || query.trim().length < 2} aria-label={t.searchAreas}>
+            <input id="where" placeholder={t.areaPlaceholder} value={query} disabled={!!busy} maxLength={100} autoComplete="off"
+              onChange={(event) => {
+                const value = event.target.value;
+                setQuery(value);
+                setArea(null);
+                search(value, 300);
+              }}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  search(query);
+                }
+              }} />
+            <button className="button secondary search-button" type="button" onClick={() => search(query)} disabled={!!busy || query.trim().length < 2} aria-label={t.searchAreas}>
               <Search size={20} strokeWidth={1.75} />
             </button>
           </div>
@@ -100,7 +129,7 @@ export function CreateRoom({ demo, locale }: { demo: boolean; locale: Locale }) 
           <button className="text-action" type="button" onClick={locate} disabled={!!busy}>
             <Crosshair size={17} strokeWidth={1.75} /> {busy === "location" ? t.findingLocation : t.useLocation}
           </button>
-          {busy === "search" && <p className="muted small" role="status">{t.searching}</p>}
+          {searching && <p className="muted small" role="status">{t.searching}</p>}
           <label className="field">{t.searchDistance}
             <select className="distance-select" value={radiusKm} disabled={busy === "create"}
               onChange={(event) => setRadiusKm(Number(event.target.value))}>
