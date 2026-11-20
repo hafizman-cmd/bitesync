@@ -74,11 +74,42 @@ test("room creation forwards the selected radius and rejects unsupported values"
     assert.equal((await response.json()).code, "invalidSearchDistance");
   }
 
-  assert.deepEqual(filters, [
+  assert.deepEqual([...new Set(filters)], [
     "circle:-73.95,40.71,5000",
     "circle:-73.95,40.71,10000",
     "circle:-73.95,40.71,20000",
   ]);
+});
+
+test("wide searches include farther candidates even when the nearest page is full", async (context) => {
+  process.env.GEOAPIFY_API_KEY = "test-key";
+  context.after(() => { delete process.env.GEOAPIFY_API_KEY; });
+  const center = { lat: 0, lon: 0, label: "Test area" };
+  const restaurant = (id: string, lat: number) => ({
+    properties: { place_id: id, name: id, lat, lon: 0, distance: 5 },
+  });
+  const nearby = Array.from({ length: 20 }, (_, index) => restaurant(`near-${index}`, 0.001 * (index + 1)));
+  const biases = new Set<string>();
+  context.mock.method(globalThis, "fetch", async (input: string) => {
+    const params = new URL(input).searchParams;
+    assert.equal(params.get("filter"), "circle:0,0,20000");
+    const bias = params.get("bias")!;
+    biases.add(bias);
+    if (bias === "proximity:0,0") return Response.json({ features: nearby });
+    if (bias.startsWith("proximity:0,-")) return new Response(null, { status: 502 });
+    return Response.json({ features: [nearby[0], restaurant("middle", 0.08), restaurant("far", 0.15), restaurant("outside", 0.2)] });
+  });
+
+  const places = await findPlaces(center, 20);
+  assert.equal(biases.size, 5);
+  assert.equal(places.length, 8);
+  assert.equal(new Set(places.map(({ id }) => id)).size, 8);
+  assert.deepEqual(places.slice(0, 3).map(({ id, distance }) => [id, distance]), [
+    ["near-0", 111],
+    ["middle", 8896],
+    ["far", 16679],
+  ]);
+  assert.ok(places.every(({ distance }) => distance <= 20_000));
 });
 
 test("nearby search handles missing credentials and provider failures", async (context) => {

@@ -2,6 +2,10 @@ import { RoomError } from "./errors";
 import { DEFAULT_SEARCH_DISTANCE_KM, type SearchDistanceKm } from "./search-distance";
 import type { Area, Place } from "./types";
 
+const EARTH_RADIUS_METERS = 6_371_000;
+const RADIANS_PER_DEGREE = Math.PI / 180;
+const ROOM_PLACE_LIMIT = 8;
+
 type Feature = {
   properties: {
     place_id?: string;
@@ -12,7 +16,6 @@ type Feature = {
     city?: string;
     lat?: number;
     lon?: number;
-    distance?: number;
     categories?: string[];
   };
 };
@@ -50,33 +53,74 @@ export async function searchAreas(query: string): Promise<Area[]> {
 }
 
 function distanceFrom(area: Area, lat: number, lon: number) {
-  const radians = Math.PI / 180;
-  const a = Math.sin((lat - area.lat) * radians / 2) ** 2 +
-    Math.cos(area.lat * radians) * Math.cos(lat * radians) * Math.sin((lon - area.lon) * radians / 2) ** 2;
-  return 12742000 * Math.asin(Math.min(1, Math.sqrt(a)));
+  const a = Math.sin((lat - area.lat) * RADIANS_PER_DEGREE / 2) ** 2 +
+    Math.cos(area.lat * RADIANS_PER_DEGREE) * Math.cos(lat * RADIANS_PER_DEGREE) *
+    Math.sin((lon - area.lon) * RADIANS_PER_DEGREE / 2) ** 2;
+  return 2 * EARTH_RADIUS_METERS * Math.asin(Math.min(1, Math.sqrt(a)));
+}
+
+function pointAlongBearing(area: Area, meters: number, bearing: number) {
+  const lat = area.lat * RADIANS_PER_DEGREE;
+  const angle = meters / EARTH_RADIUS_METERS;
+  const targetLat = Math.asin(Math.sin(lat) * Math.cos(angle) + Math.cos(lat) * Math.sin(angle) * Math.cos(bearing));
+  const deltaLon = Math.atan2(Math.sin(bearing) * Math.sin(angle) * Math.cos(lat),
+    Math.cos(angle) - Math.sin(lat) * Math.sin(targetLat));
+  return {
+    lat: targetLat / RADIANS_PER_DEGREE,
+    lon: (area.lon + deltaLon / RADIANS_PER_DEGREE + 540) % 360 - 180,
+  };
+}
+
+function mixByDistance(places: Place[], radiusMeters: number) {
+  const bands: Place[][] = [[], [], []];
+  for (const place of places.sort((a, b) => a.distance - b.distance)) {
+    const band = Math.min(2, Math.floor(3 * place.distance / radiusMeters));
+    bands[band].push(place);
+  }
+
+  const mixed: Place[] = [];
+  const count = Math.min(ROOM_PLACE_LIMIT, places.length);
+  for (let index = 0; mixed.length < count; index++) {
+    for (const band of bands) {
+      if (band[index]) mixed.push(band[index]);
+    }
+  }
+  return mixed.slice(0, count);
 }
 
 export async function findPlaces(area: Area, radiusKm: SearchDistanceKm = DEFAULT_SEARCH_DISTANCE_KM): Promise<Place[]> {
-  const features = await geoapify("v2/places", {
+  const radiusMeters = radiusKm * 1000;
+  const wideSearch = radiusKm > DEFAULT_SEARCH_DISTANCE_KM;
+  const search = ({ lon, lat }: Pick<Area, "lon" | "lat">) => geoapify("v2/places", {
     categories: "catering.restaurant",
-    filter: `circle:${area.lon},${area.lat},${radiusKm * 1000}`,
-    bias: `proximity:${area.lon},${area.lat}`,
+    filter: `circle:${area.lon},${area.lat},${radiusMeters}`,
+    bias: `proximity:${lon},${lat}`,
     limit: "20",
   });
+  // Query toward the edges so dense nearby results cannot fill every provider page.
+  const bearings = wideSearch ? [0, Math.PI / 2, Math.PI, 3 * Math.PI / 2] : [];
+  const [nearby, additional] = await Promise.all([
+    search(area),
+    Promise.allSettled(bearings.map((bearing) => search(pointAlongBearing(area, radiusMeters * 0.75, bearing)))),
+  ]);
+  const features = nearby.concat(additional.flatMap((result) => result.status === "fulfilled" ? result.value : []));
 
   const seen = new Set<string>();
   const places = features.flatMap(({ properties }) => {
-    const { place_id: id, name, lat, lon, categories, distance } = properties;
+    const { place_id: id, name, lat, lon, categories } = properties;
     if (!id || !name || typeof lat !== "number" || typeof lon !== "number" || seen.has(id)) return [];
+    // Provider distances are relative to each query's bias point.
+    const distance = distanceFrom(area, lat, lon);
+    if (!Number.isFinite(distance) || distance > radiusMeters) return [];
     seen.add(id);
     const category = categories?.find((entry) => entry.startsWith("catering.restaurant."));
     return [{
       id, name, lat, lon,
       address: properties.address_line2 || properties.formatted || "",
-      distance: Math.round(distance ?? distanceFrom(area, lat, lon)),
+      distance: Math.round(distance),
       cuisine: category ? normalizeCuisine(category.split(".").at(-1)!) : "Restaurant",
     }];
   });
 
-  return places.slice(0, 8);
+  return wideSearch ? mixByDistance(places, radiusMeters) : places.slice(0, ROOM_PLACE_LIMIT);
 }
