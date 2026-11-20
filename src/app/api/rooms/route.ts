@@ -3,6 +3,7 @@ import { RoomError } from "@/lib/errors";
 import { readBody, readName, routeError, setRoomCookie } from "@/lib/http";
 import { findPlaces } from "@/lib/places";
 import { createRoom } from "@/lib/rooms";
+import { DEFAULT_SEARCH_DISTANCE_KM, SEARCH_DISTANCES_KM } from "@/lib/search-distance";
 import { SAMPLE_AREA, SAMPLE_PLACES, type Area } from "@/lib/types";
 
 function readArea(value: unknown): Area {
@@ -18,11 +19,13 @@ function readArea(value: unknown): Area {
 
 export async function POST(request: Request) {
   try {
-    const { name, demo, area } = await readBody(request);
+    const { name, demo, area, radiusKm = DEFAULT_SEARCH_DISTANCE_KM } = await readBody(request);
     const playerName = readName(name);
     const isDemo = demo === true;
     const location = isDemo ? SAMPLE_AREA : readArea(area);
-    const places = isDemo ? SAMPLE_PLACES : await findPlaces(location);
+    const searchDistance = SEARCH_DISTANCES_KM.find((distance) => distance === radiusKm);
+    if (!isDemo && searchDistance === undefined) throw new RoomError("invalidSearchDistance");
+    const places = isDemo ? SAMPLE_PLACES : await findPlaces(location, searchDistance);
     if (places.length < 2) throw new RoomError("tooFewPlaces", 422);
     const { code, token } = await createRoom(playerName, location.label, places, isDemo);
     const response = NextResponse.json({ code }, { status: 201 });

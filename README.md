@@ -19,7 +19,7 @@ With no database credentials, the app creates a local SQLite database called `bi
 
 Copy `.env.example` to `.env.local`. Set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` from a Turso database and `GEOAPIFY_API_KEY` from a Geoapify project. The server initializes the tables on first use. Restart the app after editing environment variables.
 
-Select **Create room**, search for a city or neighborhood or grant browser location access, then pick an area. Make Mano uses Geoapify Geocoding and searches for up to eight named restaurants within 3 km using Places v2. Live place cards include addresses and distances from the search center. Use HTTPS for location access from phones.
+Select **Create room**, then pick a city or neighborhood or use your current location. Make Mano uses Geoapify Geocoding and Places v2 to find up to eight named restaurants within the selected straight-line radius of 3, 5, 10, or 20 km. The default is 3 km. Live place cards include addresses and distances from the search center. Use HTTPS for location access from phones.
 
 ## Round rules
 

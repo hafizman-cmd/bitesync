@@ -1,4 +1,5 @@
 import { RoomError } from "./errors";
+import { DEFAULT_SEARCH_DISTANCE_KM, type SearchDistanceKm } from "./search-distance";
 import type { Area, Place } from "./types";
 
 type Feature = {
@@ -55,10 +56,10 @@ function distanceFrom(area: Area, lat: number, lon: number) {
   return 12742000 * Math.asin(Math.min(1, Math.sqrt(a)));
 }
 
-export async function findPlaces(area: Area): Promise<Place[]> {
+export async function findPlaces(area: Area, radiusKm: SearchDistanceKm = DEFAULT_SEARCH_DISTANCE_KM): Promise<Place[]> {
   const features = await geoapify("v2/places", {
     categories: "catering.restaurant",
-    filter: `circle:${area.lon},${area.lat},3000`,
+    filter: `circle:${area.lon},${area.lat},${radiusKm * 1000}`,
     bias: `proximity:${area.lon},${area.lat}`,
     limit: "20",
   });

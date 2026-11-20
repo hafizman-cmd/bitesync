@@ -8,6 +8,7 @@ import { copy } from "@/lib/copy";
 import { errors, type ErrorCode } from "@/lib/errors";
 import type { Locale } from "@/lib/locale";
 import { requestErrorCode, requestJson } from "@/lib/request";
+import { DEFAULT_SEARCH_DISTANCE_KM, SEARCH_DISTANCES_KM } from "@/lib/search-distance";
 import type { Area } from "@/lib/types";
 
 export function CreateRoom({ demo, locale }: { demo: boolean; locale: Locale }) {
@@ -17,6 +18,7 @@ export function CreateRoom({ demo, locale }: { demo: boolean; locale: Locale }) 
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<Area[] | null>(null);
   const [area, setArea] = useState<Area | null>(null);
+  const [radiusKm, setRadiusKm] = useState<number>(DEFAULT_SEARCH_DISTANCE_KM);
   const [busy, setBusy] = useState<"search" | "location" | "create" | null>(null);
   const [error, setError] = useState<ErrorCode | null>(null);
 
@@ -61,7 +63,7 @@ export function CreateRoom({ demo, locale }: { demo: boolean; locale: Locale }) 
     setError(null);
     setBusy("create");
     try {
-      const { code } = await requestJson<{ code: string }>("/api/rooms", { name, area, demo });
+      const { code } = await requestJson<{ code: string }>("/api/rooms", { name, area, demo, radiusKm });
       router.push(`/room/${code}`);
     } catch (error) {
       setError(requestErrorCode(error));
@@ -77,7 +79,7 @@ export function CreateRoom({ demo, locale }: { demo: boolean; locale: Locale }) 
       <p className="panel-description">{demo ? t.demoIntro : t.createIntro}</p>
       <form onSubmit={submit} className="stack">
         <label className="field">{t.name}
-          <input value={name} onChange={(event) => setName(event.target.value)} autoComplete="nickname" maxLength={32} required placeholder={t.nameExample} />
+          <input value={name} onChange={(event) => setName(event.target.value)} autoComplete="nickname" maxLength={32} required placeholder={t.hostNameExample} />
         </label>
         {!demo && <div className="stack compact">
           <label className="field" htmlFor="where">{t.where}</label>
@@ -99,6 +101,12 @@ export function CreateRoom({ demo, locale }: { demo: boolean; locale: Locale }) 
             <Crosshair size={17} strokeWidth={1.75} /> {busy === "location" ? t.findingLocation : t.useLocation}
           </button>
           {busy === "search" && <p className="muted small" role="status">{t.searching}</p>}
+          <label className="field">{t.searchDistance}
+            <select className="distance-select" value={radiusKm} disabled={busy === "create"}
+              onChange={(event) => setRadiusKm(Number(event.target.value))}>
+              {SEARCH_DISTANCES_KM.map((distance) => <option key={distance} value={distance}>{distance} km</option>)}
+            </select>
+          </label>
         </div>}
         {error && <p className="error-text" role="alert">{errors[error][locale]}</p>}
         <button className="button primary wide" disabled={!!busy}>{busy === "create" ? t.creating : t.create} <ArrowRight size={19} strokeWidth={1.75} /></button>
