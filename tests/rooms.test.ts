@@ -11,7 +11,7 @@ import { withRoomTransaction } from "../src/lib/db";
 import { errors, RoomError } from "../src/lib/errors";
 import { decide } from "../src/lib/results";
 import { createRoom, getRoom, updateRoom } from "../src/lib/rooms";
-import { SAMPLE_AREA, SAMPLE_PLACES } from "../src/lib/types";
+import { mapsLink, MAX_HOST_PLACES, SAMPLE_AREA, SAMPLE_PLACES, type RoomState } from "../src/lib/types";
 
 const folder = mkdtempSync(join(tmpdir(), "bitesync-"));
 process.env.TURSO_DATABASE_URL = `file:${join(folder, "test.db")}`;
@@ -104,4 +104,54 @@ test("the room API validates input and keeps host authority in a scoped cookie",
   assert.deepEqual(await forbidden.json(), { error: errors.joinFirst.en, code: "joinFirst" });
   assert.equal((await start(cookie.split(";")[0])).status, 200);
   assert.equal((await getRoomRoute(new NextRequest(url), context)).headers.get("Cache-Control"), "private, no-store");
+});
+
+test("hosts can create a room from their own picks and vote without location or Google requests", async (context) => {
+  const origin = "https://example.test";
+  const headers = { "Content-Type": "application/json" };
+  const fetchMock = context.mock.method(globalThis, "fetch", async () => {
+    throw new Error("Manual rooms must not call an external provider");
+  });
+  const create = (hostPlaces: unknown) => createRoomRoute(new Request(`${origin}/api/rooms`, {
+    method: "POST", headers, body: JSON.stringify({ name: "Alex", includeAutomatic: false, hostPlaces }),
+  }));
+  for (const [picks, status, code] of [
+    [["Only one"], 422, "tooFewHostPlaces"],
+    [["Warung Kita", " warung   kita "], 400, "duplicateHostPlace"],
+    [["", "Cafe"], 400, "invalidHostPlaces"],
+    [Array.from({ length: MAX_HOST_PLACES + 1 }, (_, index) => `Place ${index}`), 400, "invalidHostPlaces"],
+  ] as const) {
+    const invalid = await create(picks);
+    assert.equal(invalid.status, status);
+    assert.equal((await invalid.json()).code, code);
+  }
+
+  const created = await create(["  warung   kita ", "KFC café-grill"]);
+  assert.equal(created.status, 201);
+  const { code } = await created.json() as { code: string };
+  const url = `${origin}/api/rooms/${code}`;
+  const roomContext = { params: Promise.resolve({ code }) };
+  const requestRoom = () => getRoomRoute(new NextRequest(url), roomContext);
+  const room = await (await requestRoom()).json() as RoomState;
+  assert.deepEqual(room.places.map(({ name, provider, distance }) => [name, provider, distance]), [
+    ["Warung Kita", "host", null],
+    ["KFC Café-Grill", "host", null],
+  ]);
+  assert.equal(new URL(mapsLink(room.places[0])).searchParams.get("query"), "Warung Kita");
+
+  const act = (body: object, cookie?: string) => changeRoomRoute(new NextRequest(url, {
+    method: "POST",
+    headers: { ...headers, ...(cookie ? { Cookie: cookie } : {}) },
+    body: JSON.stringify(body),
+  }), roomContext);
+  const host = created.headers.get("set-cookie")!.split(";")[0];
+  assert.equal((await act({ action: "start" })).status, 403);
+  assert.equal((await act({ action: "start" }, host)).status, 200);
+  for (const place of room.places) {
+    assert.equal((await act({ action: "vote", placeId: place.id, vote: "like" }, host)).status, 200);
+  }
+  const finished = await (await requestRoom()).json() as RoomState;
+  assert.equal(finished.status, "finished");
+  assert.equal(finished.result?.place.name, "Warung Kita");
+  assert.equal(fetchMock.mock.callCount(), 0);
 });

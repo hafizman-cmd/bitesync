@@ -11,15 +11,17 @@ npm ci
 npm run dev
 ```
 
-Open [Make Mano](http://localhost:3000) and select **Try a demo**. Create a sample room, copy its link, and open it in a separate browser profile or private window to join as a second diner. In the host window, select **Start round**.
+Open [Make Mano](http://localhost:3000) and select **Try a demo**. Copy the room link into a separate browser profile or private window to join as a second diner, then select **Start round** as host.
 
-With no database credentials, the app creates a local SQLite database called `bitesync.db`. Sample rooms use four fixtures and never call Geoapify. Sample photos illustrate cuisines.
+Without a Turso URL, the app uses local SQLite (`bitesync.db`). Demo rooms use four sample restaurants with illustrative photos and require no API key.
 
 ## Enable live restaurant search
 
-Copy `.env.example` to `.env.local`. Set `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` from a Turso database and `GEOAPIFY_API_KEY` from a Geoapify project. The server initializes the tables on first use. Restart the app after editing environment variables.
+Set `TAVILY_API_KEY` in `.env.local` using `.env.example` as a template. [Tavily's free plan](https://www.tavily.com/pricing) has a monthly usage allowance. Restart the app after editing environment variables. The server initializes the tables on first use.
 
-Select **Create room**, then pick a city or neighborhood or use your current location. Make Mano uses Geoapify Geocoding and Places v2 to find up to eight named restaurants within the selected straight-line radius of 3, 5, 10, or 20 km. The default is 3 km. Wider searches look for a mix of nearby and farther restaurants. Live place cards include addresses and distances from the search center. Use HTTPS for location access from phones.
+Select **Create room**, then type a city or neighborhood or use **Use my location**. The location button sends the browser's coordinates to [BigDataCloud](https://www.bigdatacloud.com/geocoding-apis/free-reverse-geocode-to-city-api) to fill in the area. Phone geolocation requires HTTPS. Each automatic room runs one Tavily search and stores up to 10 restaurant names and source links. The cuisine preference guides the query. The host can add their own restaurant names to the same round or turn off automatic suggestions to play with at least two host suggestions. A winner can be opened with a regular Google Maps link.
+
+Rooms containing Google Places references from the previous version must be recreated. The app used to save only the Google IDs for those restaurants.
 
 ## Round rules
 
@@ -37,8 +39,8 @@ npm run build
 npm start
 ```
 
-Use a Next.js host with a free Node.js tier, such as Vercel Hobby for eligible personal projects. Add the four environment variables in the provider’s settings and set `NEXT_PUBLIC_APP_URL` to the public HTTPS origin. Use remote Turso for shared state across instances. Small groups can run within the providers’ free-tier quotas. Make Mano uses Google Maps links for directions.
+Deploy to a Next.js host. Use remote Turso for shared state across instances and set `NEXT_PUBLIC_APP_URL` to the public HTTPS origin. Configure the variables from `.env.example` in the host’s settings.
 
-Use the browser’s install action, or **Share > Add to Home Screen** on iOS. The production app includes a manifest and an offline screen in both languages. Room updates and votes require an internet connection.
+Use the browser’s install action, or **Share > Add to Home Screen** on iOS. The production app has a bilingual offline screen. Room updates and votes require a network connection.
 
-Homepage photos from the [Pak Gembus Malaysia website](https://ayamgepukpakgembus.com.my/). Other photos from [Unsplash](https://unsplash.com/license). Locally hosted DM Sans and Instrument Serif fonts are distributed under the SIL Open Font License. Restaurant data is provided by [Geoapify](https://www.geoapify.com/) and [OpenStreetMap contributors](https://www.openstreetmap.org/copyright).
+Homepage photos from the [Pak Gembus Malaysia website](https://ayamgepukpakgembus.com.my/). Other photos from [Unsplash](https://unsplash.com/license). Locally hosted DM Sans and Instrument Serif fonts are distributed under the SIL Open Font License. Web suggestions link to the dining guides returned by Tavily. Older rooms with complete Geoapify snapshots still credit [Geoapify](https://www.geoapify.com/) and [OpenStreetMap contributors](https://www.openstreetmap.org/copyright).

@@ -11,6 +11,8 @@ import { requestErrorCode, requestJson, RequestError } from "@/lib/request";
 import { distanceLabel, mapsLink, ROUND_SECONDS, type Place, type RoomState, type Vote } from "@/lib/types";
 import type { RoomAction } from "@/lib/rooms";
 
+type VoteAction = Extract<RoomAction, { action: "vote" }>;
+
 const voteButtons = [
   { vote: "pass", icon: X },
   { vote: "veto", icon: Ban },
@@ -35,24 +37,27 @@ function PlaceCard({ place, onVote, locale }: { place: Place; locale: Locale; on
   return <article className={`place-card ${onVote ? "swipe-card" : ""}`}
     style={offset ? { transform: `translateX(${offset * 0.45}px) rotate(${offset * 0.035}deg)` } : undefined}
     onPointerDown={onVote ? (event) => {
-      if (!event.isPrimary || event.button !== 0) return;
+      if (!event.isPrimary || event.button !== 0 || (event.target as Element).closest("a")) return;
       start.current = { x: event.clientX, y: event.clientY };
       event.currentTarget.setPointerCapture(event.pointerId);
     } : undefined}
     onPointerMove={onVote ? (event) => { if (start.current) setOffset(Math.max(-130, Math.min(130, event.clientX - start.current.x))); } : undefined}
     onPointerUp={onVote ? end : undefined}
-    onPointerCancel={() => { start.current = null; setOffset(0); }}>
+    onLostPointerCapture={() => { start.current = null; setOffset(0); }}>
     <div className={`place-visual ${place.image ? "has-image" : ""}`}>
       {place.image ? <Image src={place.image} alt="" fill draggable={false} sizes="(max-width: 540px) 95vw, 488px" /> : <Utensils size={68} strokeWidth={1.75} />}
       {offset > 35 && <span className="swipe-stamp like">{t.votes.like}</span>}
       {offset < -35 && <span className="swipe-stamp pass">{t.votes.pass}</span>}
     </div>
     <div className="place-info">
-      <p className="eyebrow">{cuisineLabel(place.cuisine, locale)}</p>
+      <p className="eyebrow">{place.provider === "host" ? t.hostSuggestion : place.provider === "web" ? t.webSuggestion : cuisineLabel(place.cuisine, locale)}</p>
       <h2>{place.name}</h2>
-      <p className="place-meta"><MapPin size={17} strokeWidth={1.75} /> {place.address ? <span>{place.address}</span> : null}
+      {place.distance !== null && <p className="place-meta"><MapPin size={17} strokeWidth={1.75} /> {place.address ? <span>{place.address}</span> : null}
         <span className="distance">{t.away(distanceLabel(place.distance))}</span>
-      </p>
+      </p>}
+      {place.provider === "web" && <a className="text-action small" href={place.sourceUrl} target="_blank" rel="noopener noreferrer">
+        {t.placeSource} <ArrowUpRight size={14} aria-hidden="true" />
+      </a>}
     </div>
   </article>;
 }
@@ -65,6 +70,8 @@ export function Room({ code, locale }: { code: string; locale: Locale }) {
   const [unavailable, setUnavailable] = useState(false);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [pendingVotes, setPendingVotes] = useState<VoteAction[]>([]);
+  const voteQueue = useRef<VoteAction[]>([]);
   const [copied, setCopied] = useState(false);
   const [showLink, setShowLink] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -74,10 +81,12 @@ export function Room({ code, locale }: { code: string; locale: Locale }) {
   const revision = useRef(0);
   const acting = useRef(false);
   const celebrated = useRef(false);
+  const loaded = useRef<RoomState | null>(null);
   const url = `/api/rooms/${encodeURIComponent(code)}`;
   const finished = room?.status === "finished";
 
   function receive(next: RoomState) {
+    loaded.current = next;
     clockOffset.current = next.serverTime - Date.now();
     setNow(next.serverTime);
     setRoom(next);
@@ -98,7 +107,7 @@ export function Room({ code, locale }: { code: string; locale: Locale }) {
         if (!cancelled && requestRevision === revision.current) receive(next);
       } catch (error) {
         if (cancelled || requestRevision !== revision.current) return;
-        setUnavailable(error instanceof RequestError && error.status === 404);
+        setUnavailable(error instanceof RequestError && (error.status === 404 || error.status === 410));
         setConnectionError(requestErrorCode(error));
       } finally {
         inFlight = false;
@@ -113,7 +122,7 @@ export function Room({ code, locale }: { code: string; locale: Locale }) {
       window.clearInterval(interval);
       document.removeEventListener("visibilitychange", poll);
     };
-  }, [url, finished, unavailable]);
+  }, [code, url, finished, unavailable]);
 
   const active = room?.status === "active";
   useEffect(() => {
@@ -132,8 +141,9 @@ export function Room({ code, locale }: { code: string; locale: Locale }) {
     }
   }, [finished, room]);
 
-  async function act(action: RoomAction) {
-    if (acting.current) return;
+  async function act(action: Exclude<RoomAction, VoteAction>) {
+    const details = loaded.current;
+    if (acting.current || details?.code !== code) return;
     acting.current = true;
     revision.current++;
     setError(null);
@@ -145,6 +155,34 @@ export function Room({ code, locale }: { code: string; locale: Locale }) {
     } finally {
       acting.current = false;
       setBusy(false);
+    }
+  }
+
+  async function flushVotes() {
+    if (acting.current) return;
+    acting.current = true;
+    revision.current++;
+    try {
+      while (voteQueue.current.length > 0) {
+        const action = voteQueue.current[0];
+        const next = await requestJson<RoomState>(url, action).catch((error: unknown) => {
+          if (error instanceof RequestError && error.status < 500) throw error;
+          // The server accepts an identical vote again if the first response was lost.
+          return requestJson<RoomState>(url, action);
+        });
+        receive(next);
+        voteQueue.current.shift();
+        if (next.status !== "active" && voteQueue.current.length) {
+          throw new RequestError("votingClosed", 409);
+        }
+        setPendingVotes([...voteQueue.current]);
+      }
+    } catch (error) {
+      voteQueue.current = [];
+      setPendingVotes([]);
+      setError(requestErrorCode(error));
+    } finally {
+      acting.current = false;
     }
   }
 
@@ -182,7 +220,10 @@ export function Room({ code, locale }: { code: string; locale: Locale }) {
     </section>
   </div>;
 
-  const ballots = room.me?.votes ?? {};
+  const ballots = {
+    ...room.me?.votes,
+    ...Object.fromEntries(pendingVotes.map(({ placeId, vote }) => [placeId, vote])),
+  };
   const link = new URL(window.location.pathname, window.location.origin).href;
   const canShare = typeof navigator.share === "function";
   const cast = Object.keys(ballots).length;
@@ -192,15 +233,25 @@ export function Room({ code, locale }: { code: string; locale: Locale }) {
   const done = room.players.filter((player) => player.done).length;
 
   function vote(next: Vote) {
-    if (current && seconds > 0) void act({ action: "vote", placeId: current.id, vote: next });
+    const details = loaded.current;
+    if (!current || details?.status !== "active" || !details.me || !details.deadline ||
+        Date.now() + clockOffset.current >= details.deadline) return;
+    const queued = voteQueue.current;
+    if (Object.hasOwn(details.me.votes, current.id) || queued.some(({ placeId }) => placeId === current.id)) return;
+    if ((next === "crave" || next === "veto") &&
+        (Object.values(details.me.votes).includes(next) || queued.some(({ vote }) => vote === next))) return;
+    queued.push({ action: "vote", placeId: current.id, vote: next });
+    setPendingVotes([...queued]);
+    setError(null);
+    void flushVotes();
   }
 
   return <div className="flow-width room-flow">
     <Link href="/" className="back-link"><ArrowLeft size={17} strokeWidth={1.75} /> {t.home}</Link>
-    <div className="room-context">
-      <span><MapPin size={16} strokeWidth={1.75} /> {room.area === "Near me" ? t.nearMe : room.area}</span>
+    {(room.area || room.demo) && <div className="room-context">
+      {room.area && <span><MapPin size={16} strokeWidth={1.75} /> {room.area === "Near me" ? t.nearMe : room.area}</span>}
       {room.demo && <span className="sample-label">{t.sample}</span>}
-    </div>
+    </div>}
     {connectionError && <p className="error-text" role="alert">{errors[connectionError][locale]}</p>}
     {room.status === "lobby" && <section className="panel">
       <span className="step-icon"><Users size={22} strokeWidth={1.75} /></span>
@@ -254,8 +305,10 @@ export function Room({ code, locale }: { code: string; locale: Locale }) {
         <p className="vote-hint">{t.swipe}</p>
       </> : <section className="panel">
         <span className="step-icon"><Clock3 size={23} strokeWidth={1.75} /></span>
-        <h2 className="flow-heading">{seconds === 0 ? t.tallying : room.me ? t.submitted : t.voting}</h2>
-        <p className="panel-description">{seconds === 0 ? t.resultSoon : room.me ? t.waitForResult : t.followResult}</p>
+        <h2 className="flow-heading" role={pendingVotes.length ? "status" : undefined}>
+          {pendingVotes.length ? t.savingVotes : seconds === 0 ? t.tallying : room.me ? t.submitted : t.voting}
+        </h2>
+        {!pendingVotes.length && <p className="panel-description">{seconds === 0 ? t.resultSoon : room.me ? t.waitForResult : t.followResult}</p>}
         <p className="done-count"><Users size={18} strokeWidth={1.75} /> {t.done(done, room.players.length)}</p>
       </section>}
     </>}
@@ -266,11 +319,11 @@ export function Room({ code, locale }: { code: string; locale: Locale }) {
         <PlaceCard locale={locale} place={room.result.place} />
         <p className="result-votes"><span><Heart size={16} strokeWidth={1.75} /> {t.likes(room.result.likes)}</span>
           <span><Star size={16} strokeWidth={1.75} /> {t.craves(room.result.craves)}</span></p>
-        <a className="button primary wide" target="_blank" rel="noopener noreferrer" href={mapsLink(room.result.place)}>{t.maps} <ArrowUpRight size={18} strokeWidth={1.75} /></a>
+        <a className="button primary wide" target="_blank" rel="noopener noreferrer" href={mapsLink(room.result.place, room.area)}>{t.maps} <ArrowUpRight size={18} strokeWidth={1.75} /></a>
       </> : <p className="panel-description">{t.noMatchReason}</p>}
       <Link href={room.demo ? "/create?demo=1" : "/create"} className="button secondary wide"><Link2 size={18} strokeWidth={1.75} /> {t.another}</Link>
     </section>}
     {error && <p className="error-text room-error" role="alert">{errors[error][locale]}</p>}
-    {!room.demo && <p className="attribution">{t.placesBy} <a href="https://www.geoapify.com/" target="_blank" rel="noopener noreferrer">Geoapify</a> {t.and} <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">{t.contributors}</a></p>}
+    {!room.demo && room.places.some((place) => !place.provider) && <p className="attribution">{t.placesBy} <a href="https://www.geoapify.com/" target="_blank" rel="noopener noreferrer">Geoapify</a> {t.and} <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">{t.contributors}</a></p>}
   </div>;
 }

@@ -152,18 +152,18 @@ button:disabled { cursor: default; opacity: .55; }
 .stack { display: grid; gap: 17px; }
 .stack.compact { gap: 9px; }
 .field { display: grid; gap: 7px; color: var(--ink); font-size: 14px; font-weight: 700; }
-input, .distance-select { display: block; min-width: 0; width: 100%; min-height: 46px; padding: 10px 13px; border: 1px solid var(--border); border-radius: 9px; background: var(--background); color: var(--ink); font-size: 16px; font-weight: 400; }
+input, .cuisine-select { display: block; min-width: 0; width: 100%; min-height: 46px; padding: 10px 13px; border: 1px solid var(--border); border-radius: 9px; background: var(--background); color: var(--ink); font-size: 16px; font-weight: 400; }
 input::placeholder { color: var(--muted); opacity: .78; }
-input:focus-visible, .distance-select:focus-visible { outline-offset: 1px; }
+input:focus-visible, .cuisine-select:focus-visible { outline-offset: 1px; }
 .search-row { display: flex; gap: 8px; }
 .search-button { min-height: 46px; min-width: 46px; padding: 0; }
+.suggestion-toggle { display: flex; align-items: center; gap: 9px; min-height: 32px; }
+.suggestion-toggle input { width: 18px; min-height: 18px; padding: 0; }
+.host-places { display: grid; gap: 6px; }
+.host-place-input { text-transform: capitalize; }
+.host-place-input::placeholder { text-transform: none; }
+.host-places li { display: flex; align-items: center; justify-content: space-between; gap: 8px; overflow-wrap: anywhere; }
 .text-action { display: inline-flex; justify-self: start; align-items: center; gap: 6px; min-height: 40px; font-weight: 700; font-size: 14px; color: var(--accent-ink); }
-.area-options { border: 1px solid var(--border); border-radius: 9px; overflow: hidden; }
-.area-options li + li { border-top: 1px solid var(--border); }
-.area-options button { display: flex; align-items: center; gap: 8px; min-height: 43px; padding: 6px 10px; width: 100%; text-align: left; font-size: 14px; }
-.area-options button:hover { background: var(--accent-soft); }
-.area-options svg, .area-selected svg { flex: none; color: var(--accent-ink); }
-.area-selected { display: flex; align-items: center; gap: 7px; color: var(--accent-ink); }
 .wide { width: 100%; }
 .below-form { margin-top: 16px; text-align: center; font-size: 14px; color: var(--accent-ink); }
 .below-form a, .attribution a { text-decoration: underline; text-underline-offset: 3px; }
@@ -190,8 +190,10 @@ progress::-webkit-progress-bar { background: var(--border); }
 progress::-webkit-progress-value { background: var(--accent); }
 progress::-moz-progress-bar { background: var(--accent); }
 .place-card { background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; text-align: left; }
-.swipe-card { touch-action: pan-y; cursor: grab; user-select: none; }
-.swipe-card:active { cursor: grabbing; }
+.swipe-card { touch-action: pan-y; cursor: grab; user-select: none; transition: transform 150ms ease-out; animation: swipe-card-in 140ms ease-out; }
+.swipe-card:active { cursor: grabbing; transition: none; }
+@keyframes swipe-card-in { from { opacity: .65; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .swipe-card { animation: none; transition: none; } }
 .place-visual { position: relative; display: grid; place-items: center; height: clamp(155px, 40vw, 250px); border-bottom: 1px solid var(--border); background-color: var(--accent-soft); color: var(--accent-ink); }
 .place-visual:not(.has-image) { background-image: radial-gradient(circle, #d94e1f24 1px, transparent 1px); background-size: 13px 13px; }
 .place-visual img { object-fit: cover; }

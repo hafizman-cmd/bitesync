@@ -1,126 +1,136 @@
 import { RoomError } from "./errors";
-import { DEFAULT_SEARCH_DISTANCE_KM, type SearchDistanceKm } from "./search-distance";
-import type { Area, Place } from "./types";
+import type { CuisineOption } from "./restaurant-filters";
+import { placeNameKey, type Place } from "./types";
 
-const EARTH_RADIUS_METERS = 6_371_000;
-const RADIANS_PER_DEGREE = Math.PI / 180;
-const ROOM_PLACE_LIMIT = 8;
+const MAX_WEB_PLACES = 10;
+const NUMBERED_ENTRY = /(?:^|[\n;·|])\s*(?:\*{1,2})?\d{1,2}[.)]\s+([^\n;·|]+)/g;
+const NUMBERED_HEADING = /^#{2,5}\s+\*{0,2}\d{1,2}[.)]\s+([^\n]+)/gm;
 
-type Feature = {
-  properties: {
-    place_id?: string;
-    name?: string;
-    address_line2?: string;
-    formatted?: string;
-    street?: string;
-    city?: string;
-    lat?: number;
-    lon?: number;
-    categories?: string[];
-  };
-};
+type SearchResult = { title?: string; url?: string; content?: string; raw_content?: string };
+type Candidate = { name: string; sourceUrl: string; locality: number; publishers: Set<string> };
 
-function normalizeCuisine(value: string) {
-  return value.split("_").map((word) => word.charAt(0).toUpperCase() + word.slice(1)).join(" ");
+function restaurantName(entry: string) {
+  if (/\b(?:permanently|temporarily) closed\b/i.test(entry)) return null;
+  const trimmed = entry.replace(/^\[([^\]]+)\]\([^)]*\)/, "$1")
+    .replace(/\*\*/g, "")
+    .replace(/\s*\[Review\]$/i, "")
+    .trim();
+  const [heading, description] = trimmed.split(/\s+[–—-]\s+/, 2);
+  // Some food guides put the dish before the venue, as in "Satay – Terminal Satay Zul at Jalan…".
+  const venue = description?.match(/^(.{3,70})\s+at\s+(?:Jalan|Kampung|Taman|Lorong)\b/i)?.[1];
+  const name = (venue ?? (/\b(?:food|restaurants?)$/i.test(heading) ? description ?? heading : heading))
+    .replace(/^.{12,65}:\s+(?=\p{L})/u, "")
+    .split(/\s+@\s*|\s+\d\.\d\b|\[\.\.\.\]|\.\s+/, 1)[0]
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[.!:]+$/, "");
+  if (name.length < 3 || name.length > 80 || name.split(" ").length > 10 ||
+      !/\p{L}/u.test(name) ||
+      /^(?:best|top|what|where|how|why|day|restaurants?\s+in)\b|\b(?:guide restaurants|food street|reviews|price range)\b|^(?:stall|restaurant|cafe)$|https?:|[?!]/i.test(name)) {
+    return null;
+  }
+  return name;
 }
 
-async function geoapify(path: string, params: Record<string, string>): Promise<Feature[]> {
-  const key = process.env.GEOAPIFY_API_KEY;
-  if (!key || key === "your-geoapify-api-key") {
-    throw new RoomError("placesUnconfigured", 503);
-  }
+function locationWords(value: string) {
+  return placeNameKey(value).replace(/[^\p{L}\p{N}]+/gu, " ").trim()
+    .replace(/(\p{L}) (?=\d)/gu, "$1")
+    .replace(/\bkl\b/g, "kuala lumpur");
+}
 
-  const query = new URLSearchParams({ ...params, apiKey: key });
+function candidateKey(name: string, locations: string[]) {
+  const key = locationWords(name.replace(/['’]/g, ""));
+  const suffix = locations.find((location) => key.endsWith(` ${location}`));
+  return suffix ? key.slice(0, -suffix.length).trimEnd() : key;
+}
+
+function sourceNames(result: SearchResult, url: URL) {
+  if (/(^|\.)yelp\.com$/.test(url.hostname) && url.pathname.startsWith("/biz/")) {
+    const name = restaurantName((result.title ?? "").split(" - ")[0]);
+    return name && !/\b(?:resort|hotel|homestay)$/i.test(name) ? [name] : [];
+  }
+  const headings = typeof result.raw_content === "string"
+    ? [...result.raw_content.slice(0, 100_000).matchAll(NUMBERED_HEADING)].flatMap(([, entry]) => restaurantName(entry) ?? [])
+    : [];
+  if (headings.length > 1) return headings;
+  const snippet = result.content ?? "";
+  const entries = [...snippet.matchAll(NUMBERED_ENTRY)].flatMap(([, entry]) => restaurantName(entry) ?? []);
+  return entries.length > 1 ? entries : headings;
+}
+
+function searchCandidates(results: SearchResult[], locations: string[], cuisine: CuisineOption) {
+  const restaurants = new Map<string, Candidate>();
+  const lists = results.flatMap((result) => {
+    if (!result || typeof result.url !== "string" || typeof result.title !== "string" ||
+        typeof result.content !== "string") return [];
+    let url: URL;
+    try { url = new URL(result.url); } catch { return []; }
+    if (!["https:", "http:"].includes(url.protocol) || url.username || url.password) return [];
+    const source = ` ${locationWords(`${result.title} ${url.pathname} ${url.search.replace(/%20|\+/g, " ")}`)} `;
+    const match = locations.findIndex((location) => source.includes(` ${location} `));
+    if (match === -1 || (cuisine !== "any" && !source.includes(` ${cuisine} `))) return [];
+    const names = sourceNames(result, url);
+    return names.length ? [{ url, names, locality: locations.length - match }] : [];
+  });
+
+  // Visit the top entry from each guide first. Repeated names across publishers rank higher.
+  const depth = Math.max(0, ...lists.map(({ names }) => names.length));
+  for (let index = 0; index < depth; index++) {
+    for (const { url, names, locality } of lists) {
+      const name = names[index];
+      if (!name) continue;
+      const key = candidateKey(name, locations);
+      if (!key) continue;
+      const publisher = url.hostname.replace(/^www\./, "");
+      const existing = restaurants.get(key);
+      if (existing) {
+        existing.publishers.add(publisher);
+        if (locality > existing.locality) {
+          existing.locality = locality;
+          existing.sourceUrl = url.href;
+        }
+      } else {
+        restaurants.set(key, { name, sourceUrl: url.href, locality, publishers: new Set([publisher]) });
+      }
+    }
+  }
+  return [...restaurants.values()].sort((a, b) => b.locality - a.locality || b.publishers.size - a.publishers.size);
+}
+
+export async function findPlaces(area: string, cuisine: CuisineOption, hostNames: string[]): Promise<Place[]> {
+  const key = process.env.TAVILY_API_KEY?.trim();
+  if (!key) throw new RoomError("placesUnconfigured", 503);
+  const kind = cuisine === "any" ? "" : `${cuisine} `;
+  let results: SearchResult[];
   try {
-    const response = await fetch(`https://api.geoapify.com/${path}?${query}`, {
-      signal: AbortSignal.timeout(7000),
-      next: { revalidate: 300 },
+    const response = await fetch("https://api.tavily.com/search", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: `Best popular ${kind}restaurants in ${area}. Local restaurant names from ranked food guides.`,
+        search_depth: "basic",
+        max_results: 12,
+        include_raw_content: "markdown",
+        safe_search: true,
+      }),
+      signal: AbortSignal.timeout(12000),
+      cache: "no-store",
     });
-    if (!response.ok) throw new Error("Places request failed");
-    const data = await response.json() as { features?: Feature[] };
-    return data.features ?? [];
+    if (!response.ok) throw new Error("Web search failed");
+    const data = await response.json() as { results?: SearchResult[] };
+    if (!Array.isArray(data.results)) throw new Error("Invalid web search response");
+    results = data.results;
   } catch {
     throw new RoomError("placesUnavailable", 502);
   }
-}
 
-export async function searchAreas(query: string): Promise<Area[]> {
-  const features = await geoapify("v1/geocode/autocomplete", { text: query, limit: "5", format: "geojson" });
-  return features.flatMap(({ properties }) => {
-    const { lat, lon, formatted } = properties;
-    return typeof lat === "number" && typeof lon === "number" && formatted ? [{ lat, lon, label: formatted }] : [];
-  });
-}
-
-function distanceFrom(area: Area, lat: number, lon: number) {
-  const a = Math.sin((lat - area.lat) * RADIANS_PER_DEGREE / 2) ** 2 +
-    Math.cos(area.lat * RADIANS_PER_DEGREE) * Math.cos(lat * RADIANS_PER_DEGREE) *
-    Math.sin((lon - area.lon) * RADIANS_PER_DEGREE / 2) ** 2;
-  return 2 * EARTH_RADIUS_METERS * Math.asin(Math.min(1, Math.sqrt(a)));
-}
-
-function pointAlongBearing(area: Area, meters: number, bearing: number) {
-  const lat = area.lat * RADIANS_PER_DEGREE;
-  const angle = meters / EARTH_RADIUS_METERS;
-  const targetLat = Math.asin(Math.sin(lat) * Math.cos(angle) + Math.cos(lat) * Math.sin(angle) * Math.cos(bearing));
-  const deltaLon = Math.atan2(Math.sin(bearing) * Math.sin(angle) * Math.cos(lat),
-    Math.cos(angle) - Math.sin(lat) * Math.sin(targetLat));
-  return {
-    lat: targetLat / RADIANS_PER_DEGREE,
-    lon: (area.lon + deltaLon / RADIANS_PER_DEGREE + 540) % 360 - 180,
-  };
-}
-
-function mixByDistance(places: Place[], radiusMeters: number) {
-  const bands: Place[][] = [[], [], []];
-  for (const place of places.sort((a, b) => a.distance - b.distance)) {
-    const band = Math.min(2, Math.floor(3 * place.distance / radiusMeters));
-    bands[band].push(place);
-  }
-
-  const mixed: Place[] = [];
-  const count = Math.min(ROOM_PLACE_LIMIT, places.length);
-  for (let index = 0; mixed.length < count; index++) {
-    for (const band of bands) {
-      if (band[index]) mixed.push(band[index]);
-    }
-  }
-  return mixed.slice(0, count);
-}
-
-export async function findPlaces(area: Area, radiusKm: SearchDistanceKm = DEFAULT_SEARCH_DISTANCE_KM): Promise<Place[]> {
-  const radiusMeters = radiusKm * 1000;
-  const wideSearch = radiusKm > DEFAULT_SEARCH_DISTANCE_KM;
-  const search = ({ lon, lat }: Pick<Area, "lon" | "lat">) => geoapify("v2/places", {
-    categories: "catering.restaurant",
-    filter: `circle:${area.lon},${area.lat},${radiusMeters}`,
-    bias: `proximity:${lon},${lat}`,
-    limit: "20",
-  });
-  // Query toward the edges so dense nearby results cannot fill every provider page.
-  const bearings = wideSearch ? [0, Math.PI / 2, Math.PI, 3 * Math.PI / 2] : [];
-  const [nearby, additional] = await Promise.all([
-    search(area),
-    Promise.allSettled(bearings.map((bearing) => search(pointAlongBearing(area, radiusMeters * 0.75, bearing)))),
-  ]);
-  const features = nearby.concat(additional.flatMap((result) => result.status === "fulfilled" ? result.value : []));
-
-  const seen = new Set<string>();
-  const places = features.flatMap(({ properties }) => {
-    const { place_id: id, name, lat, lon, categories } = properties;
-    if (!id || !name || typeof lat !== "number" || typeof lon !== "number" || seen.has(id)) return [];
-    // Provider distances are relative to each query's bias point.
-    const distance = distanceFrom(area, lat, lon);
-    if (!Number.isFinite(distance) || distance > radiusMeters) return [];
-    seen.add(id);
-    const category = categories?.find((entry) => entry.startsWith("catering.restaurant."));
-    return [{
-      id, name, lat, lon,
-      address: properties.address_line2 || properties.formatted || "",
-      distance: Math.round(distance),
-      cuisine: category ? normalizeCuisine(category.split(".").at(-1)!) : "Restaurant",
-    }];
-  });
-
-  return wideSearch ? mixByDistance(places, radiusMeters) : places.slice(0, ROOM_PLACE_LIMIT);
+  const locations = area.split(",").map(locationWords).filter(Boolean).slice(0, 2);
+  const hostKeys = new Set(hostNames.map((name) => candidateKey(name, locations)));
+  return searchCandidates(results, locations, cuisine)
+    .filter(({ name }) => !hostKeys.has(candidateKey(name, locations)))
+    .slice(0, MAX_WEB_PLACES)
+    .map(({ name, sourceUrl }, index) => ({
+      id: `web-${String(index + 1).padStart(2, "0")}`,
+      name, sourceUrl, provider: "web", cuisine: "Restaurant", address: "", distance: null,
+    }));
 }

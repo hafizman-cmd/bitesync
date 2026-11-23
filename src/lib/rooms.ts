@@ -6,6 +6,7 @@ import { decide } from "./results";
 import { MAX_PLAYERS, ROUND_SECONDS, type Place, type RoomState, type Vote } from "./types";
 
 const ROOM_LIFETIME = 24 * 60 * 60 * 1000;
+type LegacyPlaceReference = { id: string; distance: number; provider: "google" };
 
 function digest(token: string) {
   return createHash("sha256").update(token).digest("hex");
@@ -15,10 +16,14 @@ async function snapshot(tx: Transaction, code: string, token?: string): Promise<
   const rooms = await tx.execute({ sql: "SELECT * FROM rooms WHERE code = ? AND created_at > ?", args: [code, Date.now() - ROOM_LIFETIME] });
   const room = rooms.rows[0];
   if (!room) throw new RoomError("roomExpired", 404);
+  const places = JSON.parse(String(room.places)) as (Place | LegacyPlaceReference)[] | { areaPlaceId?: string };
+  if (!Array.isArray(places) || places.some((place) => place.provider === "google")) {
+    throw new RoomError("legacyRoomUnavailable", 410);
+  }
+  const fullPlaces = places as Place[];
 
   const players = await tx.execute({ sql: "SELECT token, name, host FROM players WHERE room_code = ? ORDER BY host DESC, joined_at, token", args: [code] });
   const ballots = await tx.execute({ sql: "SELECT token, place_id, vote FROM ballots WHERE room_code = ?", args: [code] });
-  const places = JSON.parse(String(room.places)) as Place[];
   const current = token ? digest(token) : "";
   const member = players.rows.find((player) => player.token === current);
   const roster = players.rows.map((player) => ({
@@ -30,26 +35,27 @@ async function snapshot(tx: Transaction, code: string, token?: string): Promise<
   const now = Date.now();
   const status = deadline === null ? "lobby" : now >= deadline || roster.every(({ done }) => done) ? "finished" : "active";
   return {
-    code, area: String(room.area), demo: Boolean(room.demo), deadline, status, serverTime: now, places,
+    code, area: String(room.area), demo: Boolean(room.demo), deadline, status, serverTime: now, places: fullPlaces,
     players: roster,
     me: member ? {
       host: Boolean(member.host),
       votes: Object.fromEntries(ballots.rows.filter((ballot) => ballot.token === current).map((ballot) => [String(ballot.place_id), ballot.vote as Vote])),
     } : null,
-    result: status === "finished" ? decide(places, ballots.rows.map((ballot) => ({ placeId: String(ballot.place_id), vote: ballot.vote as Vote }))) : null,
+    result: status === "finished" ? decide(fullPlaces, ballots.rows.map((ballot) => ({ placeId: String(ballot.place_id), vote: ballot.vote as Vote }))) : null,
   };
 }
 
 export async function createRoom(name: string, area: string, places: Place[], demo: boolean) {
   const code = randomBytes(9).toString("base64url");
   const token = randomBytes(24).toString("base64url");
+  const storedPlaces = JSON.stringify(places);
   return withRoomTransaction("write", async (tx) => {
     const expiry = Date.now() - ROOM_LIFETIME;
     await tx.batch([
       { sql: "DELETE FROM ballots WHERE room_code IN (SELECT code FROM rooms WHERE created_at <= ?)", args: [expiry] },
       { sql: "DELETE FROM players WHERE room_code IN (SELECT code FROM rooms WHERE created_at <= ?)", args: [expiry] },
       { sql: "DELETE FROM rooms WHERE created_at <= ?", args: [expiry] },
-      { sql: "INSERT INTO rooms (code, area, demo, places, created_at) VALUES (?, ?, ?, ?, ?)", args: [code, area, Number(demo), JSON.stringify(places), Date.now()] },
+      { sql: "INSERT INTO rooms (code, area, demo, places, created_at) VALUES (?, ?, ?, ?, ?)", args: [code, area, Number(demo), storedPlaces, Date.now()] },
       { sql: "INSERT INTO players VALUES (?, ?, ?, 1, ?)", args: [code, digest(token), name, Date.now()] },
     ]);
     return { code, token };

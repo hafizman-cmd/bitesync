@@ -1,5 +1,7 @@
 export const ROUND_SECONDS = 90;
 export const MAX_PLAYERS = 16;
+export const MAX_HOST_PLACES = 10;
+export const MAX_HOST_PLACE_NAME = 100;
 export const VOTES = ["pass", "like", "crave", "veto"] as const;
 export type Vote = (typeof VOTES)[number];
 
@@ -14,11 +16,12 @@ export type Place = {
   name: string;
   cuisine: string;
   address: string;
-  lat: number;
-  lon: number;
-  distance: number;
   image?: string;
-};
+} & (
+  | { provider?: never; lat: number; lon: number; distance: number }
+  | { provider: "host"; distance: null }
+  | { provider: "web"; sourceUrl: string; distance: null }
+);
 
 export type RoomState = {
   code: string;
@@ -46,7 +49,18 @@ export function distanceLabel(meters: number) {
   return meters < 1000 ? `${meters} m` : `${(meters / 1000).toFixed(1)} km`;
 }
 
-export function mapsLink(place: Place) {
-  const query = place.address ? `${place.name}, ${place.address}` : `${place.lat},${place.lon}`;
-  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+export function placeNameKey(name: string) {
+  return name.normalize("NFKC").toLowerCase().trim().replace(/\s+/g, " ");
+}
+
+export function formatHostPlaceName(name: string) {
+  return name.trim().replace(/\s+/g, " ").replace(/(^|[ -])\p{L}/gu, (initial) => initial.toUpperCase());
+}
+
+export function mapsLink(place: Place, area = "") {
+  const query = place.provider
+    ? [place.name, area].filter(Boolean).join(", ")
+    : place.address ? `${place.name}, ${place.address}` : `${place.lat},${place.lon}`;
+  const params = new URLSearchParams({ api: "1", query });
+  return `https://www.google.com/maps/search/?${params}`;
 }
